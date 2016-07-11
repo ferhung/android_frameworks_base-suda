@@ -102,7 +102,7 @@ void Caches::initExtensions() {
         eventMark = eventMarkNull;
         startMark = startMarkNull;
         endMark = endMarkNull;
-+#endif
+#endif
 }
 
 void Caches::initConstraints() {
