@@ -617,7 +617,7 @@ public class PackageManagerService extends IPackageManager.Stub {
     final ArraySet<String> mTransferedPackages = new ArraySet<String>();
 
     // Broadcast actions that are only available to the system.
-    final ArraySet<String> mProtectedBroadcasts = new ArraySet<String>();
+    final ArrayMap<String, String> mProtectedBroadcasts = new ArrayMap<>();
 
     /** List of packages waiting for verification. */
     final SparseArray<PackageVerificationState> mPendingVerification
@@ -4041,7 +4041,19 @@ public class PackageManagerService extends IPackageManager.Stub {
     @Override
     public boolean isProtectedBroadcast(String actionName) {
         synchronized (mPackages) {
-            return mProtectedBroadcasts.contains(actionName);
+            return mProtectedBroadcasts.containsKey(actionName);
+        }
+    }
+
+    @Override
+    public boolean isProtectedBroadcastAllowed(String actionName, int callingUid) {
+        synchronized (mPackages) {
+            if (mProtectedBroadcasts.containsKey(actionName)) {
+               final int result = checkUidPermission(mProtectedBroadcasts.get(actionName),
+                        callingUid);
+                return result == PackageManager.PERMISSION_GRANTED;
+            }
+            return false;
         }
     }
 
@@ -7490,6 +7502,25 @@ public class PackageManagerService extends IPackageManager.Stub {
         KeySetManagerService ksms = mSettings.mKeySetManagerService;
         ksms.assertScannedPackageValid(pkg);
 
+        // Get the current theme config. We do this outside the lock
+        // since ActivityManager might be waiting on us already
+        // and a deadlock would result.
+        final boolean isBootScan = (scanFlags & SCAN_BOOTING) != 0;
+        ThemeConfig config = mBootThemeConfig;
+        if (!isBootScan) {
+            final IActivityManager am = ActivityManagerNative.getDefault();
+            try {
+                if (am != null) {
+                    config = am.getConfiguration().themeConfig;
+                } else {
+                    Log.w(TAG, "ActivityManager getDefault() " +
+                            "returned null, cannot compile app's theme");
+                }
+            } catch(RemoteException e) {
+                Log.w(TAG, "Failed to get the theme config from ActivityManager");
+            }
+        }
+
         // writer
         synchronized (mPackages) {
             // We don't expect installation to fail beyond this point
@@ -7831,13 +7862,13 @@ public class PackageManagerService extends IPackageManager.Stub {
             if (pkg.protectedBroadcasts != null) {
                 N = pkg.protectedBroadcasts.size();
                 for (i=0; i<N; i++) {
-                    mProtectedBroadcasts.add(pkg.protectedBroadcasts.get(i));
+                    mProtectedBroadcasts.put(pkg.protectedBroadcasts.keyAt(i),
+                            pkg.protectedBroadcasts.valueAt(i));
                 }
             }
 
             pkgSetting.setTimeStamp(scanFileTime);
 
-            final boolean isBootScan = (scanFlags & SCAN_BOOTING) != 0;
             // Generate resources & idmaps if pkg is NOT a theme
             // We must compile resources here because during the initial boot process we may get
             // here before a default theme has had a chance to compile its resources
@@ -7845,21 +7876,6 @@ public class PackageManagerService extends IPackageManager.Stub {
             // in background)
             if (pkg.mOverlayTargets.isEmpty() && mOverlays.containsKey(pkg.packageName)) {
                 ArrayMap<String, PackageParser.Package> themes = mOverlays.get(pkg.packageName);
-
-                final IActivityManager am = ActivityManagerNative.getDefault();
-                ThemeConfig themeConfig = null;
-                try {
-                    if (am != null) {
-                        themeConfig = am.getConfiguration().themeConfig;
-                    } else {
-                        Log.e(TAG, "ActivityManager getDefault() " +
-                                "returned null, cannot compile app's theme");
-                    }
-                } catch(RemoteException e) {
-                    Log.e(TAG, "Failed to get the theme config ", e);
-                }
-
-                ThemeConfig config = isBootScan ? mBootThemeConfig : themeConfig;
 
                 if (config != null) {
                     for(PackageParser.Package themePkg : themes.values()) {
@@ -9457,12 +9473,15 @@ public class PackageManagerService extends IPackageManager.Stub {
             mFlags = flags;
             List<ResolveInfo> list = super.queryIntent(intent, resolvedType,
                     (flags & PackageManager.MATCH_DEFAULT_ONLY) != 0, userId);
-            // Remove protected Application components
+            // Remove protected Application components if they're explicitly queried for.
+            // Implicit intent queries will be gated when the returned component is acted upon.
             int callingUid = Binder.getCallingUid();
             String[] pkgs = getPackagesForUid(callingUid);
             List<String> packages = (pkgs != null) ? Arrays.asList(pkgs) : Collections.EMPTY_LIST;
-            if (callingUid != Process.SYSTEM_UID &&
-                    (getFlagsForUid(callingUid) & ApplicationInfo.FLAG_SYSTEM) == 0) {
+            final boolean isNotSystem = callingUid != Process.SYSTEM_UID &&
+                    (getFlagsForUid(callingUid) & ApplicationInfo.FLAG_SYSTEM) == 0;
+
+            if (isNotSystem && intent.getComponent() != null) {
                Iterator<ResolveInfo> itr = list.iterator();
                 while (itr.hasNext()) {
                     ActivityInfo activityInfo = itr.next().activityInfo;

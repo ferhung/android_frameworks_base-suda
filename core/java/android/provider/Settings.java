@@ -2388,6 +2388,13 @@ public final class Settings {
             "lock_pattern_tactile_feedback_enabled";
 
         /**
+         * Whether to use the custom quick unlock screen control
+         * @hide
+         */
+        public static final String LOCKSCREEN_QUICK_UNLOCK_CONTROL =
+                "lockscreen_quick_unlock_control";
+
+        /**
          * A formatted string of the next alarm that is set, or the empty string
          * if there is no alarm set.
          *
@@ -3557,6 +3564,12 @@ public final class Settings {
                 }
             }
         };
+
+        /**
+         * Three Finger Gesture
+         * @hide
+         */
+        public static final String THREE_FINGER_GESTURE = "three_finger_gesture";
 
         /**
          * IMPORTANT: If you add a new public settings you also have to add it to
